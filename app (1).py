@@ -5,19 +5,59 @@ Stack: Streamlit (UI) + Google Gemini Flash (AI).
 Run with:  streamlit run app.py
 """
 
+import importlib
 import io
 import json
 import os
 import re
+import subprocess
+import sys
 
 import streamlit as st
-from google import genai
-from google.genai import types
 
 # --------------------------------------------------------------------------- #
-# Page config
+# Page config (must be the first Streamlit call)
 # --------------------------------------------------------------------------- #
 st.set_page_config(page_title="StudyForge", page_icon="📚", layout="wide")
+
+
+# --------------------------------------------------------------------------- #
+# Dependency handling: install a missing package at runtime if needed
+# --------------------------------------------------------------------------- #
+def _pip_install(pip_name: str) -> None:
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "--quiet", pip_name]
+    )
+    importlib.invalidate_caches()
+
+
+def _ensure(import_name: str, pip_name: str):
+    """Import a module, installing its pip package first if it is missing."""
+    try:
+        return importlib.import_module(import_name)
+    except ImportError:
+        _pip_install(pip_name)
+        return importlib.import_module(import_name)
+
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    try:
+        with st.spinner("Installing google-genai (first run only)…"):
+            _pip_install("google-genai")
+        from google import genai
+        from google.genai import types
+    except Exception as exc:  # noqa: BLE001
+        st.error(
+            "The `google-genai` package is not installed and automatic install "
+            f"failed ({exc}).\n\n"
+            "Fix: put a file named `requirements.txt` in the SAME folder/repo "
+            "root as this app, containing the line `google-genai`, then reboot "
+            "the app. Locally, run `pip install google-genai`."
+        )
+        st.stop()
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 MAX_CHARS = 400_000  # safety cap on text sent to the model
@@ -27,7 +67,7 @@ MAX_CHARS = 400_000  # safety cap on text sent to the model
 # Text extraction
 # --------------------------------------------------------------------------- #
 def extract_pdf(file) -> str:
-    from pypdf import PdfReader
+    PdfReader = _ensure("pypdf", "pypdf").PdfReader
 
     reader = PdfReader(file)
     pages = []
@@ -39,7 +79,7 @@ def extract_pdf(file) -> str:
 
 
 def extract_docx(file) -> str:
-    from docx import Document
+    Document = _ensure("docx", "python-docx").Document
 
     doc = Document(file)
     parts = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -52,7 +92,7 @@ def extract_docx(file) -> str:
 
 
 def extract_pptx(file) -> str:
-    from pptx import Presentation
+    Presentation = _ensure("pptx", "python-pptx").Presentation
 
     prs = Presentation(file)
     slides = []
